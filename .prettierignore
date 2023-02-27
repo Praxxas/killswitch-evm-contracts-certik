@@ -1,0 +1,17 @@
+.husky
+artifacts
+cache
+docs
+node_modules
+soldata
+typechain-types
+
+gasReporterOutput.json
+remix-compiler.config.js
+
+coverage*
+.*rc
+.env*
+.*ignore
+tags*
+yarn*
