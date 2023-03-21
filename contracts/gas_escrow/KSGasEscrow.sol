@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.7;
 
-import "../interfaces/IERC20.sol";
+import "../utils/SafeERC20.sol";
 import "../interfaces/ITriggerFactoryToken.sol";
 
 /**
@@ -9,7 +9,12 @@ import "../interfaces/ITriggerFactoryToken.sol";
     @title KS Gas Escrow Smart Contract
 */
 contract KSGasEscrow {
+    using SafeERC20 for IERC20;
+    
     // Events ------
+
+        /// Emit an event
+        event EmitEvent(string result);
 
     // Variables ------
 
@@ -18,7 +23,7 @@ contract KSGasEscrow {
         struct Settings {
             address owner;
             bool isOpen;
-            uint256 gasPercent; // 100 = 1%, 1,000 = 10%, 10,000 = 100%
+            bool reEntrancyProtect;
         }
         /// @notice KSGasEscrow settings
         Settings private _settings;
@@ -46,6 +51,7 @@ contract KSGasEscrow {
 
     // Modifiers ------
         modifier isOwner() { require(msg.sender == _settings.owner, "ERR: not owner"); _; }
+        modifier isOwnerOrAuthorized() { require(msg.sender == _settings.owner || msg.sender == _tf._authorized(), "ERR: Not owner or auth"); _; }
         modifier isAuthorized() { require(msg.sender == _tf._authorized(), "ERR: not auth"); _; }
         modifier reEntrancyProtect(address address_) {
             if(_depositors[address_].isValid == true && _depositors[address_].reEntrancyGuard == false) {
@@ -58,12 +64,20 @@ contract KSGasEscrow {
                 revert("ERR: Not valid");
             }
         }
+        modifier noReEntrancyGlobal() {
+            require(_settings.reEntrancyProtect == false, "ReentrancyGuard: not allowed");
+            _settings.reEntrancyProtect = true;
+
+            _;
+
+            _settings.reEntrancyProtect = false;
+        }
 
     // Constructor ------
         constructor () {
             _settings.owner = msg.sender;
             _settings.isOpen = true;
-            _settings.gasPercent = 1000;
+            _settings.reEntrancyProtect = false;
         }
 
     // Get functions ------
@@ -78,12 +92,6 @@ contract KSGasEscrow {
             @return _status The status for deposits/withdrawals
         */
         function escrowStatus() public view returns (bool _status) { return _settings.isOpen; }
-
-        /**
-            @notice Setting saved in a struct, requires a get function.
-            @return gasPercent_ Any additional percentage of gas to consume during a contract call for front running
-        */
-        function gasPercent() public view returns (uint256 gasPercent_) { return _settings.gasPercent; }
         
         /**
             @notice Address is pulled directly from the _tf contract.
@@ -146,39 +154,58 @@ contract KSGasEscrow {
             @notice Restricted to _owner.
             @param tf_ The new address to set
         */
-        function setTriggerFactory(address tf_) public isOwner() { _tf = ITriggerFactoryToken(tf_); }
+        function setTriggerFactory(address tf_) public isOwner {
+            _tf = ITriggerFactoryToken(tf_);
+
+            emit EmitEvent("Trigger Factory Modified");
+        }
 
         /// @notice Call to open or close the ks gas escrow contract.
         /// @notice Restricted to _tf._authorized
-        function adjustContractStatus() external isAuthorized { _settings.isOpen = !_settings.isOpen; }
+        function adjustContractStatus() external isOwnerOrAuthorized {
+            _settings.isOpen = !_settings.isOpen;
+
+            emit EmitEvent("Contract Status Modified");
+        }
         
         /**
             @notice To change the ks gas escrow owner address.
             @notice Restricted to _tf._authorized
             @param owner_ The new address to set
         */
-        function changeOwner(address owner_) external isAuthorized { _settings.owner = owner_; }
-        
-        /**
-            @notice To change the ks gas escrow owner address.
-            @notice Restricted to _tf._authorized
-            @dev 100 = 1%, 1,000 = 10%, 10,000 = 100%
-            @param newGas_ The percent at which to additionally transfer
-        */
-        function changeGasPercent(uint256 newGas_) external isAuthorized { _settings.gasPercent = newGas_; }
+        function changeOwner(address owner_) external isOwner {
+            _settings.owner = owner_;
+
+            emit EmitEvent("Owner Changed Successfully");
+        }
     
         /**
             @notice Restricted to _owner.
             @param to_ Address to receive coins
         */
-        function recoverCoin(address to_) public virtual isAuthorized { payable(to_).transfer(address(this).balance); }
+        function recoverCoin(address to_) public isOwner noReEntrancyGlobal {
+            require(to_ != address(0), "ERR: to cannot be zero address");
+
+            (bool success, ) = payable(to_).call{value: address(this).balance}("");
+            require(success, "Unable to recover");
+
+            emit EmitEvent("COINS Recovered Successfully");
+        }
 
         /**
             @notice Restricted to _owner.
             @param token_ Token address to retrieve
             @param to_ Address to receive coins
         */
-        function recoverToken(address token_, address to_) public virtual isAuthorized { IERC20(token_).transfer(to_, IERC20(token_).balanceOf(address(this))); }
+        function recoverToken(address token_, address to_) public isOwner {
+            require(to_ != address(0), "ERR: to cannot be zero address");
+            
+            IERC20(token_).safeTransfer(to_, IERC20(token_).balanceOf(address(this)));
+            
+            emit EmitEvent("TOKENS Recovered Successfully");
+        }
+
+    // Depositor/Withdrawer functions ------
 
         /**
             @notice Function to call to deposit gas into the escrow
@@ -207,7 +234,8 @@ contract KSGasEscrow {
 
             _logTransaction(msg.sender, 3, amount_, "");
 
-            sendTo.transfer(amount_);
+            (bool success, ) = sendTo.call{value: amount_}("");
+            require(success, "Unable to withdraw");
         }
 
         /**
@@ -220,13 +248,13 @@ contract KSGasEscrow {
             @param reference_ Any memo that should accompany any owner override transactions, typically the transaction ID of an execution that gas didn't get refunded for
             @return gasQuantity_ The total amount of gas refunded to KS from the deposited amount
         */
-        function transferToGasWallet(uint256 amount_, address addressFrom_, uint256 txType_, string memory reference_) public returns (uint256 gasQuantity_) {
+        function transferToGasWallet(uint256 amount_, address addressFrom_, uint256 txType_, string calldata reference_) external returns (uint256 gasQuantity_) {
             require(msg.sender == _settings.owner || msg.sender == _tf._authorized() || _tf.triggerExists(_tf._individualTriggersByAddress(msg.sender)) == true, "ERR: Not allowed");
             require(_depositors[addressFrom_].depositBalance >= amount_ && address(this).balance >= amount_, "ERR: Not enough");
 
             (uint256 amount) = _logTransaction(addressFrom_, txType_, amount_, reference_);
 
-            (bool success, bytes memory data) = payable(_tf._gasWallet()).call{value: amount}("");
+            (bool success, ) = payable(_tf._gasWallet()).call{value: amount}("");
             require(success, "ERR: Refund failed");
 
             return amount;
@@ -262,12 +290,11 @@ contract KSGasEscrow {
             if(typeOfTx_ == 1) { // Deposit
                 _depositors[address_].depositBalance = depositBalance + amount;
             } else if(typeOfTx_ == 2) { // Trigger Executed By KS
-                amount = amount_ * tx.gasprice;
-                if(_settings.gasPercent >= 1) {
-                    amount = amount + ((amount * _settings.gasPercent) / 10000);
-                }
+                _depositors[address_].depositBalance = depositBalance - amount;
             } else if(typeOfTx_ == 3) { // Withdrawal
                 _depositors[address_].depositBalance = depositBalance - amount;
+            } else {
+                revert("ERR: Unapproved tx type");
             }
 
             _depositors[address_].transactions[txCount].amount = amount;

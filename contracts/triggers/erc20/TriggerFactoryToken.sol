@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.7;
 
+import "../../utils/SafeERC20.sol";
 import "./TriggerIndividualToken.sol";
 import "../../interfaces/IKSGasEscrow.sol";
 
@@ -9,6 +10,13 @@ import "../../interfaces/IKSGasEscrow.sol";
     @title KS Token Trigger Factory Smart Contract
 */
 contract TriggerFactoryToken {
+    using SafeERC20 for IERC20;
+
+    // Events ------
+
+        /// Emit an event
+        event EmitEvent(string result);
+
     /// Variables ------
 
         /// @notice The owner of the KillSwitch Factory
@@ -22,6 +30,9 @@ contract TriggerFactoryToken {
 
         /// @notice The gas wallet that funds remote trigger calls
         address public _gasWallet;
+
+        /// Global reEntrancy check
+        bool private _reEntrancyProtect = false;
 
         /// @notice Total individual triggers deployed
         int public _individualCount = 0;
@@ -43,9 +54,19 @@ contract TriggerFactoryToken {
     // Modifiers ------
 
         modifier isOwner() { require(msg.sender == _owner, "ERR: Not owner"); _; }
+        modifier noReEntrancyGlobal() {
+            require(_reEntrancyProtect == false, "ReentrancyGuard: not allowed");
+            _reEntrancyProtect = true;
+
+            _;
+
+            _reEntrancyProtect = false;
+        }
 
     // Constructor ------
         constructor (address gasWallet_) {
+            require(gasWallet_ != address(0), "ERR: to cannot be zero address");
+
             _owner = msg.sender;
             _authorized = msg.sender;
             _gasWallet = gasWallet_;
@@ -67,7 +88,13 @@ contract TriggerFactoryToken {
            @notice Restricted to owner.
            @param newOwner_ Address of the new owner
         */
-        function changeOwner(address newOwner_) external isOwner { _owner = newOwner_; }
+        function changeOwner(address newOwner_) external isOwner {
+            require(newOwner_ != address(0), "ERR: cannot be zero address");
+            
+            _owner = newOwner_;
+
+            emit EmitEvent("Owner Changed Successfully");
+        }
 
         /**
             @notice Changes the master grace count.
@@ -76,6 +103,8 @@ contract TriggerFactoryToken {
         */
         function changeMasterGraceCount(int newCount_) external isOwner {
             _masterGraceCount = newCount_;
+
+            emit EmitEvent("Master Grace Count Modified");
         }
 
         /**
@@ -87,6 +116,7 @@ contract TriggerFactoryToken {
         */
         function changeIndividualGraceCounts(int[] memory newCount_, address[] memory individualAddress_) external isOwner returns (address[] memory successAddresses_) {
             address[] memory successTriggers = new address[](individualAddress_.length);
+            require(newCount_.length == individualAddress_.length, "ERR: Not equal lengths");
 
             uint256 p = 0;
             for(int i=0; i<int(individualAddress_.length); i++) {
@@ -99,6 +129,8 @@ contract TriggerFactoryToken {
                 }
             }
 
+            emit EmitEvent("Individual Grace Counts Modified");
+
             return (successTriggers);
         }
 
@@ -107,14 +139,26 @@ contract TriggerFactoryToken {
             @notice Restricted to owner.
             @param newWallet_ New gas wallet address
         */
-        function changeGasWallet(address newWallet_) external isOwner { _gasWallet = newWallet_; }
+        function changeGasWallet(address newWallet_) external isOwner {
+            require(newWallet_ != address(0), "ERR: cannot be zero address");
+            
+            _gasWallet = newWallet_;
+
+            emit EmitEvent("Gas Wallet Changed Successfully");
+        }
 
         /**
             @notice Changing the gas escrow.
             @notice Restricted to owner.
             @param newEscrowAddress_ New gas escrow contract address
         */
-        function changeGasEscrow(address newEscrowAddress_) external isOwner { _gasEscrow = newEscrowAddress_; }
+        function changeGasEscrow(address newEscrowAddress_) external isOwner {
+            require(newEscrowAddress_ != address(0), "ERR: cannot be zero address");
+            
+            _gasEscrow = newEscrowAddress_;
+
+            emit EmitEvent("Gas Escrow Contract Changed Successfully");
+        }
 
 
         /**
@@ -122,32 +166,38 @@ contract TriggerFactoryToken {
             @notice Restricted to owner.
             @param newAuthorized_ New authorized wallet address
         */
-        function changeAuthorized(address newAuthorized_) external isOwner { _authorized = newAuthorized_; }
+        function changeAuthorized(address newAuthorized_) external isOwner {
+            require(newAuthorized_ != address(0), "ERR: cannot be zero address");
+            
+            _authorized = newAuthorized_;
+
+            emit EmitEvent("Authorized Changed Successfully");
+        }
 
         /**
             @notice Restricted to _owner.
             @param to_ Address to receive coins
         */
-        function recoverCoin(address to_) public virtual isOwner { payable(to_).transfer(address(this).balance); }
+        function recoverCoin(address to_) public isOwner noReEntrancyGlobal {
+            require(to_ != address(0), "ERR: to cannot be zero address");
+
+            (bool success, ) = payable(to_).call{value: address(this).balance}("");
+            require(success, "Unable to recover");
+
+            emit EmitEvent("COINS Recovered Successfully");
+        }
 
         /**
             @notice Restricted to _owner.
             @param token_ Token address to retrieve
             @param to_ Address to receive coins
         */
-        function recoverToken(address token_, address to_) public virtual isOwner { IERC20(token_).transfer(to_, IERC20(token_).balanceOf(address(this))); }
+        function recoverToken(address token_, address to_) public isOwner {
+            require(to_ != address(0), "ERR: to cannot be zero address");
 
-        /**
-            @notice Changes the authorized address of an individual trigger.
-            @notice Restricted to owner.
-            @param individualAddress_ Individual trigger address to change
-            @param newAuthorized_ New authorized address
-        */
-        function changeIndividualAuthorized(address individualAddress_, address newAuthorized_) external isOwner {
-            require(_individualTriggers[_individualTriggersByAddress[individualAddress_]].exists == true, "ERR: Does not exist");
-            require(newAuthorized_ != address(0), "ERR: New authorized invalid");
-
-            TriggerIndividualToken(individualAddress_).setNewAuthorizedAddress(newAuthorized_);
+            IERC20(token_).safeTransfer(to_, IERC20(token_).balanceOf(address(this)));
+            
+            emit EmitEvent("TOKENS Recovered Successfully");
         }
 
         /**
@@ -180,12 +230,12 @@ contract TriggerFactoryToken {
             @param backupAddress_ The address that is used as the backup for the primary protected wallet
             @return newTriggerAddress The address of the new trigger
         */
-        function deployIndividualContract(address backupAddress_, string memory passPhrase_) external returns (address newTriggerAddress) {
+        function deployIndividualContract(address backupAddress_) external returns (address newTriggerAddress) {
             require(_triggerAddressByOwner[msg.sender] == address(0), "ERR: Owner has already deployed");
             require(msg.sender != backupAddress_, "ERR: Backup cannot be primary");
             require(backupAddress_ != address(0) || backupAddress_ != address(this), "ERR: Incorrect backup address");
 
-            TriggerIndividualToken toDeploy = new TriggerIndividualToken(backupAddress_, passPhrase_, msg.sender, address(this));
+            TriggerIndividualToken toDeploy = new TriggerIndividualToken(backupAddress_, msg.sender, address(this));
 
             int currentCount = _individualCount;
 
