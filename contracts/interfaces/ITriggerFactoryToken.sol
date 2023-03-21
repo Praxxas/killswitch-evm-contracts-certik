@@ -17,7 +17,7 @@ interface ITriggerFactoryToken {
     function _triggerAddressByOwner(address) external view returns (address triggerAddress_);
     function _masterGraceCount() external view returns (int graceCount);
     function triggerExists(int id_) external view returns (bool result);
-    function changeOwner(address newOwner_) external returns (bool result);
+    function changeOwner(address newOwner_) external;
     function changeMasterGraceCount(int newCount_) external;
     function changeIndividualGraceCount(int[] memory newCount_, address[] memory individualAddress_) external returns (address[] memory successAddresses_);
     function changeGasWallet(address newWallet_) external returns (bool result);
@@ -25,7 +25,6 @@ interface ITriggerFactoryToken {
     function changeAuthorized(address newAuthorized_) external returns (bool result);
     function recoverCoin(address to_) external;
     function recoverToken(address token_, address to_) external;
-    function changeIndividualAuthorized(address individualAddress_, address newAuthorized_) external returns (bool result);
     function executeTrigger(address individualAddress_, uint256 gasOverride_) external returns (int triggerID_, int totalSaved_, int totalAttempted_, int blockNumber_, int blockTimeStamp_);
     function deployIndividualContract(address backupAddress_) external returns (address newTriggerAddress);
 }
