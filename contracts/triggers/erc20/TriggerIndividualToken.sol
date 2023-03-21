@@ -189,8 +189,14 @@ contract TriggerIndividualToken {
         /// @notice Is KillSwitch authorized to act on this contracts behalf.
         function isKSAuthorized() external view returns (bool result_) { return _settings.isAuthorized; }
 
-        /// @notice Is the contract status true (available to modify) or false (closed to modifications).
+        /// @notice Is the contract status true (available to modify) or false (closed to modifications).  This is set by the controller.
         function contractControllerStatus() external view returns (bool status_) { return _settings.controllerStatus; }
+
+        /// @notice Returns the controller address.  This is modified by the owner, while the controllerStatus is false.
+        function controller() external view returns (address controller_) { return _settings.controller; }
+
+        /// @notice Is the controller functionality being utilized.  THis is set by the owner, while the controllerStatus is false.
+        function controllerRequired() external view returns (bool isRequired_) { return _settings.isControllerRequired; }
 
     // Authorized functions ------
 
@@ -313,9 +319,21 @@ contract TriggerIndividualToken {
     // Owner & authorized functions ------
 
         /**
+            @notice Modify the controller address
+            @param newAddress_ The address of the new controller
+        */
+        function changeController(address newAddress_) external isOwner checkControllerStatus {
+            require(newAddress_ != address(0), "ERR: Cannot be zero address");
+
+            _settings.controller = newAddress_;
+        }
+
+        /**
             @notice Toggle whether to use the controller or not
         */
         function toggleControllerRequired() external isOwner checkControllerStatus {
+            require(_settings.controller != address(0), "ERR: Controller address not set.");
+
             _settings.isControllerRequired = !_settings.isControllerRequired;
         }
 
