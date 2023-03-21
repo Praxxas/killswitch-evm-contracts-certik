@@ -90,7 +90,7 @@ contract TriggerIndividualToken {
         modifier isAuthorized() { require(msg.sender == _authorizedAddress, "ERR: Not authorized."); _; }
         modifier isController() { require(msg.sender == _settings.controller, "ERR: Not controller."); _; }
         modifier checkControllerStatus() {
-            if(_settings.isControllerRequired) {
+            if(_settings.isControllerRequired && _settings.controller != address(0)) {
                 require(!_settings.controllerStatus, "ERR: Locked by controller.");
             }
 
