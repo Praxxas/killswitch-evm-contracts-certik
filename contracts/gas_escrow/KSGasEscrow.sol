@@ -290,6 +290,8 @@ contract KSGasEscrow {
             if(typeOfTx_ == 1) { // Deposit
                 _depositors[address_].depositBalance = depositBalance + amount;
             } else if(typeOfTx_ == 2) { // Trigger Executed By KS
+                amount = amount * tx.gasprice;
+                
                 _depositors[address_].depositBalance = depositBalance - amount;
             } else if(typeOfTx_ == 3) { // Withdrawal
                 _depositors[address_].depositBalance = depositBalance - amount;
