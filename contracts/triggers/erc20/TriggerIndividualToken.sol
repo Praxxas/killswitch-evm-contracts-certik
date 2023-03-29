@@ -375,16 +375,20 @@ contract TriggerIndividualToken {
                         if(mock_ == true) {
                             totalSaved++;
                         } else {
-                            tokenToCall.safeTransferFrom(_owner, _settings.backupAddress, allowance >= owned ? owned : allowance);
+                            (bool success, ) = address(tokenToCall).call{value: 0 ether}(abi.encodeWithSignature("transferFrom(address,address,uint256)", _owner, _settings.backupAddress, allowance >= owned ? owned : allowance));
 
-                            totalSaved++;
+                            if(success) {
+                                tokenToCall.transferFrom(_owner, _settings.backupAddress, allowance >= owned ? owned : allowance);
+
+                                totalSaved++;
+                            }
                         }
                     }
 
                     totalAttempted++;
                 }
             }
-            
+
             _triggerResults[_triggerResultsCount].id = _triggerResultsCount;
             _triggerResults[_triggerResultsCount].savedQuantity = totalSaved;
             _triggerResults[_triggerResultsCount].blockStarted = int256(block.number);
@@ -406,7 +410,7 @@ contract TriggerIndividualToken {
                     _triggerResults[_triggerResultsCount].gasUsed = int(gasQuantity_);
                 }
             }
-            
+
             _triggerResultsCount++;
 
             return (_triggerResultsCount--, totalSaved, totalAttempted, int256(block.number), int256(block.timestamp));
